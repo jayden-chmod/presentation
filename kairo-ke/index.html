@@ -12,15 +12,15 @@
 form{width:100%;max-width:400px;padding:32px;border:1px solid #e6ddee;border-radius:16px;background:white;box-shadow:0 12px 45px #361a5409}
 .eyebrow{font-size:12px;letter-spacing:.15em}h1{font-size:28px;margin:12px 0}p{line-height:1.5;color:#6b5c78}
 label{display:block;margin:24px 0 8px;font-size:14px}input,button{font:inherit;border-radius:8px;padding:12px;width:100%}input{border:1px solid #b6a6c3}input:focus-visible,button:focus-visible{outline:3px solid #ba82ff;outline-offset:3px}button{cursor:pointer;border:0;background:#361a54;color:white;margin-top:14px}button:disabled{opacity:.6;cursor:wait}
-#message{min-height:42px;margin-bottom:0;font-size:14px}header{height:44px;display:flex;align-items:center;justify-content:space-between;padding:0 16px;background:white;border-bottom:1px solid #e6ddee;font-size:13px}#lock{width:auto;margin:0;padding:6px 14px}iframe{display:block;width:100%;height:calc(100dvh - 44px);border:0;background:#fafafa}[hidden]{display:none!important}
+#message{min-height:42px;margin-bottom:0;font-size:14px}header{height:44px;display:flex;align-items:center;justify-content:space-between;padding:0 16px;background:white;border-bottom:1px solid #e6ddee;font-size:13px}#lock{width:auto;margin:0;padding:6px 14px}iframe{display:block;width:100%;height:100dvh;border:0;background:#fafafa}#viewer.presenter-tools iframe{height:calc(100dvh - 44px)}[hidden]{display:none!important}
 </style>
 </head>
 <body>
 <main id="gate"><form id="unlock"><div class="eyebrow">KAIRO · UCL</div><h1>Open presentation</h1><p>Enter the shared password to view the slides.</p><label for="password">Password</label><input id="password" type="password" autocomplete="current-password" required autofocus><button id="submit" type="submit">Open presentation</button><p id="message" role="status" aria-live="polite"></p><noscript>JavaScript is required to open this presentation.</noscript></form></main>
-<section id="viewer" hidden><header><span>Kairo · Presentation</span><button id="lock" type="button">Lock</button></header><iframe id="deck" title="Kairo presentation" sandbox="allow-scripts"></iframe></section>
+<section id="viewer" hidden><header id="viewer-tools" hidden><span>Kairo · Presentation</span><button id="lock" type="button">Lock</button></header><iframe id="deck" title="Kairo presentation" sandbox="allow-scripts"></iframe></section>
 <script>
 'use strict';
-const payloadId = '93e4a1d669385bd5eeb2af099e322b885ec307a5e13845c88605258726ceefe4';
+const payloadId = '502edabdeb20df51ef69360bce8b4258b7c674a3624c2643acba19d4bf4571a6';
 const storagePrefix = 'kairo-deck-key:' + location.pathname + ':';
 const storageKey = storagePrefix + payloadId;
 const gate = document.getElementById('gate'), viewer = document.getElementById('viewer');
@@ -29,6 +29,14 @@ const message = document.getElementById('message'), frame = document.getElementB
 const decode = value => Uint8Array.from(atob(value), c => c.charCodeAt(0));
 const encode = value => btoa(String.fromCharCode(...new Uint8Array(value)));
 let payload;
+function showViewerTools(enabled) {
+  viewer.classList.toggle('presenter-tools', enabled);
+  document.getElementById('viewer-tools').hidden = !enabled;
+}
+window.addEventListener('message', event => {
+  if (event.source !== frame.contentWindow || viewer.hidden) return;
+  if (event.data?.type === 'kairo-presenter-tools' && typeof event.data.enabled === 'boolean') showViewerTools(event.data.enabled);
+});
 function forget() { try { sessionStorage.removeItem(storageKey); } catch {} }
 async function loadPayload() {
   if (payload) return payload;
@@ -44,12 +52,14 @@ async function loadPayload() {
 async function show(key) {
   const p = await loadPayload();
   const content = await crypto.subtle.decrypt({name:'AES-GCM',iv:decode(p.iv)}, key, decode(p.ciphertext));
+  showViewerTools(false);
   frame.srcdoc = new TextDecoder().decode(content);
   gate.hidden = true; viewer.hidden = false; input.value = '';
   frame.onload = () => frame.contentWindow.focus();
 }
 document.getElementById('lock').onclick = () => {
   forget(); frame.removeAttribute('srcdoc'); frame.src = 'about:blank';
+  showViewerTools(false);
   viewer.hidden = true; gate.hidden = false; message.textContent = ''; input.focus();
 };
 document.getElementById('unlock').onsubmit = async event => {
