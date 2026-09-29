@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow,noarchive">
+<meta name="referrer" content="no-referrer">
+<title>Kairo · Presentation</title>
+<style>
+:root{color-scheme:light;font-family:system-ui,sans-serif;color:#361a54;background:#faf8fc}
+*{box-sizing:border-box}body{margin:0}main{min-height:100dvh;display:grid;place-items:center;padding:24px}
+form{width:100%;max-width:400px;padding:32px;border:1px solid #e6ddee;border-radius:16px;background:white;box-shadow:0 12px 45px #361a5409}
+.eyebrow{font-size:12px;letter-spacing:.15em}h1{font-size:28px;margin:12px 0}p{line-height:1.5;color:#6b5c78}
+label{display:block;margin:24px 0 8px;font-size:14px}input,button{font:inherit;border-radius:8px;padding:12px;width:100%}input{border:1px solid #b6a6c3}input:focus-visible,button:focus-visible{outline:3px solid #ba82ff;outline-offset:3px}button{cursor:pointer;border:0;background:#361a54;color:white;margin-top:14px}button:disabled{opacity:.6;cursor:wait}
+#message{min-height:42px;margin-bottom:0;font-size:14px}header{height:44px;display:flex;align-items:center;justify-content:space-between;padding:0 16px;background:white;border-bottom:1px solid #e6ddee;font-size:13px}#lock{width:auto;margin:0;padding:6px 14px}iframe{display:block;width:100%;height:calc(100dvh - 44px);border:0;background:#fafafa}[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<main id="gate"><form id="unlock"><div class="eyebrow">KAIRO · UCL</div><h1>Open presentation</h1><p>Enter the shared password to view the slides.</p><label for="password">Password</label><input id="password" type="password" autocomplete="current-password" required autofocus><button id="submit" type="submit">Open presentation</button><p id="message" role="status" aria-live="polite"></p><noscript>JavaScript is required to open this presentation.</noscript></form></main>
+<section id="viewer" hidden><header><span>Kairo · Presentation</span><button id="lock" type="button">Lock</button></header><iframe id="deck" title="Kairo presentation" sandbox="allow-scripts"></iframe></section>
+<script>
+'use strict';
+const payloadId = '93e4a1d669385bd5eeb2af099e322b885ec307a5e13845c88605258726ceefe4';
+const storagePrefix = 'kairo-deck-key:' + location.pathname + ':';
+const storageKey = storagePrefix + payloadId;
+const gate = document.getElementById('gate'), viewer = document.getElementById('viewer');
+const input = document.getElementById('password'), button = document.getElementById('submit');
+const message = document.getElementById('message'), frame = document.getElementById('deck');
+const decode = value => Uint8Array.from(atob(value), c => c.charCodeAt(0));
+const encode = value => btoa(String.fromCharCode(...new Uint8Array(value)));
+let payload;
+function forget() { try { sessionStorage.removeItem(storageKey); } catch {} }
+async function loadPayload() {
+  if (payload) return payload;
+  const response = await fetch('./payload.json', {cache:'no-store'});
+  if (!response.ok) throw Error('load');
+  const text = await response.text();
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  const hash = Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2,'0')).join('');
+  if (hash !== payloadId) throw Error('load');
+  payload = JSON.parse(text);
+  return payload;
+}
+async function show(key) {
+  const p = await loadPayload();
+  const content = await crypto.subtle.decrypt({name:'AES-GCM',iv:decode(p.iv)}, key, decode(p.ciphertext));
+  frame.srcdoc = new TextDecoder().decode(content);
+  gate.hidden = true; viewer.hidden = false; input.value = '';
+  frame.onload = () => frame.contentWindow.focus();
+}
+document.getElementById('lock').onclick = () => {
+  forget(); frame.removeAttribute('srcdoc'); frame.src = 'about:blank';
+  viewer.hidden = true; gate.hidden = false; message.textContent = ''; input.focus();
+};
+document.getElementById('unlock').onsubmit = async event => {
+  event.preventDefault(); button.disabled = true; message.textContent = 'Opening…';
+  let stage = 'load';
+  try {
+    if (!crypto.subtle) throw Error('unsupported');
+    const p = await loadPayload();
+    const material = await crypto.subtle.importKey('raw',new TextEncoder().encode(input.value),'PBKDF2',false,['deriveKey']);
+    const key = await crypto.subtle.deriveKey({name:'PBKDF2',salt:decode(p.salt),iterations:p.iterations,hash:'SHA-256'},material,{name:'AES-GCM',length:256},true,['decrypt']);
+    stage = 'decrypt'; await show(key);
+    // Keep only this payload's derived key for reloads in this tab; never store the password.
+    try { sessionStorage.setItem(storageKey, encode(await crypto.subtle.exportKey('raw',key))); } catch {}
+    message.textContent = '';
+  } catch {
+    forget(); message.textContent = stage === 'decrypt' ? 'Incorrect password. Please try again.' : 'Unable to load the presentation. Check your connection and reload this HTTPS page.';
+    input.select();
+  } finally { button.disabled = false; }
+};
+(async () => {
+  // Remove old keys for this deck only; other presentations keep their own session.
+  try { for (const k of Object.keys(sessionStorage)) if(k.startsWith(storagePrefix) && k !== storageKey) sessionStorage.removeItem(k); } catch {}
+  let saved; try { saved = sessionStorage.getItem(storageKey); } catch {}
+  if (!saved) return;
+  button.disabled = true;
+  try { await show(await crypto.subtle.importKey('raw',decode(saved),'AES-GCM',false,['decrypt'])); }
+  catch { forget(); message.textContent = 'Please enter the password to open the presentation.'; }
+  finally { button.disabled = false; }
+})();
+</script>
+</body>
+</html>
